@@ -1,0 +1,144 @@
+All data is transmitted from the uC to a hex inverter, 
+the hex inverters main function is to add signal strenght(caps help eliminate noise) The prop 
+delay between A and Y is 10-20ns, meaning the signal is delayed by an extra 20-40ns. 
+
+
+The average operating current for this device is 500mA, this device can be powered by the power from any usb 
+port. However if you wish to have the display 100% brighness all leds on 1.37A is required to get 
+the maximum output. 
+
+74HC164  - Serial in Parallel Out 
+-------------------------------------
+
+Only the Chip select data is then sent through to a 8bit serial in parallel out shift register. 
+This shift register is responsible for communicating with the different HT1632C chips 
+(4x as each HT1632C can only drive 32x8 leds each) and turning each chip on and off. through the CS. 
+
+The shift register 
+------------------
+Q0	_	CS1 // connected to D1-D2 Upper 
+Q1	_	CS2  // connected to D3-D4 Upper 
+Q2	_	CS3  // connected to D1-D2 Lower 
+Q3	_	CS4  & CS_OUT   // connected to D3-D4 Lower 
+Q4	_	NC  /not needed 
+Q5	_	NC / not needed 
+Q6	_	NC / not needed
+Q7	_	NC / not needed
+
+Max clock in signal for the serial shift ()    
+CP  =  Clock pulse     == connected to CLK_OUT - Then Clock_IN 
+MR  =  Master reset input (active low)   ==  always pulled high Not necessary for proper operation. MR = Master reset 
+DSA =  data input  A   == connected to CS_IN  (cs in isnt loaded) 
+DSB =  data input  B   == connected to 5v  -- always high //not needed
+
+Serial Shift()
+CLK = Digital Pin 9  =  Clock input for the serial shift
+CS  = DIgital pin 8  =  8 bit serial shift data input 
+
+HT1632C() 
+WR = Digital pin 11 = Clock input for write data
+DATA = Digital pin 10 = Data input for 32x16 LED 
+
+
+
+
+
+Writing to the 74HC164
+-----------------------
+According  to the functional diagram, the circuit consists of a series of JK flip flops, DSA and DSB are and'ed then 
+fed through the JK flip flops driven by a clock pulse from the Master. 
+
+No addressing, no commands simply 8clock pulses and 8 data pulses out. 
+Pseudo code 
+void Data(char data)
+{
+ for (int x=0; x < 8; x++){
+	clock low();
+	data << x; 
+	clock high();  
+ }
+// clock input (low->high, edge-triggered) 
+}
+only one chip should be pulled up at a time? 
+
+Depending on Vcc the maximum frequency can either be 61MHz -> 22MHz 
+4MHz seems to be fast enough.
+
+
+
+
+Write_out and data_out are all connected directly to the HT1632C chips. There is no input clock pulse driving 
+the circuit. With the exception of the RD and WR pins. 
+7 bits + 3 bits + 4 bits for data (10 bits for each signal and 14 clock signals)
+Write mode(14 pulses hang on high for last bit, pull cs high) - 3 bits of instruction, 7 Memory address, 4 Data. 
+Successive Write mode -(14 initial pulses + 4 clock pulses per command) write mode with the addition of 4clock pulses + 4bits of data with each increment 
+of data the memory address is incremented. 
+
+each time that CS is pulled high the device knows to accept a new command in. 
+
+void SendCommand(int command, int data, int memory) 
+{
+ CSLOW(); 
+ 
+ for(int commandcount=0; commandcount > 3; commandcount++){
+	clock low();
+	command << commandcount;  
+	clock high();
+ }
+
+  data(data);
+  
+  for(int memorycount=0; memorycount >4; memorycount++){
+	clock low();
+	memory << memory count;  
+	clock high();
+ }
+   
+ _ms_delay(1); 
+ CSHIGH();
+}
+// need to figure out how to turn 0xF1 = 5 leds would light up 
+
+
+Display Ram
+------------
+The display ram is organized into 64x4 bits. D3-D0, each byte turns on the corresponding led (pg 5- ht1632cv120.pdf) 
+See the data sheet for clarification. We need to configure our system for the 32x8, 32 cathodes and 8 cathodes. 
+command
+#define HT1632_CMD_COMS00 0x20	/* CMD= 0010-ABxx-x commons options */
+
+
+Clock 
+---------
+The clock may be sourced externally or use the internal RC oscilator (256kHz) 
+
+
+Writing to the display
+------------------------
+Each command or initial sequence to the chip is 16 bits long; first 4 bits are the operation/command
+next 8 is the memory address, next 4 is the data. If command is chosen the next 8 bits are the command 
+argument Command Arguments ( Pg 7 ) 
+
+Operation   -   Mode  -     Id 
+Read			Data		 110 //useless as the read pins are not connected 
+Write 			Data		 101 
+Read-Write		Data		 101
+Command   		Command      100
+
+
+Commands 
+-------------
+all commands are started with initially the 100 cmd followed by the 9 bit command (last bit is always DNC) 
+
+   0x00 = HT1632_CMD_SYSDIS; // Turn off both the oscillator and led duty cycle generator  
+   0x18 = HT1632_CMD_MSTMD;  // MASTER MODE - Use on-chip clock
+   0x01 = HT1632_CMD_SYSON;  // System on - Enable system oscil
+   0x20 = HT1632_CMD_COMS00; // 16*32, PMOS drivers Reflects the configuration of the display
+   0x03 = HT1632_CMD_LEDON;  // LEDs on 
+ 
+ this must be sent to all 4 Chips, this might be able to be sent separatly. 
+
+
+
+
+
